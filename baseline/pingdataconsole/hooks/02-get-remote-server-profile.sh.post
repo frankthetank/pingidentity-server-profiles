@@ -1,0 +1,70 @@
+#!/usr/bin/env sh
+#
+# Ping Identity DevOps - Docker Build Hooks
+#
+#- This hook may be used to set the server if there is a setup procedure
+#
+#- >Note: The PingData (i.e. Directory, DataSync, DataGovernance, DirectoryProxy)
+#- products will all provide this
+
+# shellcheck source=../../../../pingcommon/opt/staging/hooks/pingcommon.lib.sh
+. "${HOOKS_DIR}/pingcommon.lib.sh"
+
+_keystoreFile="$(ls ${STAGING_DIR}/instance/conf/keystore* |head -n 1)"
+_keystorePinFile="${STAGING_DIR}/instance/conf/keystore.pin"
+_truststoreFile="$(ls ${STAGING_DIR}/instance/conf/truststore* |head -n 1)"
+_truststorePinFile="${STAGING_DIR}/instance/conf/truststore.pin"
+if ! test -f "${_keystoreFile}"
+then
+    if ! test -f "${_keystorePinFile}"
+    then
+        mkdir -p "${SECRETS_DIR}"
+        if test -n "${KEYSTORE_PIN}"
+        then
+            echo "${KEYSTORE_PIN}" > "${_keystorePinFile}"
+        else
+            head -c 1024 /dev/urandom | tr -dc 'a-zA-Z0-9-' | cut -c 1-64 > "${_keystorePinFile}"
+        fi
+    fi
+    _pin="$( cat "${_keystorePinFile}" )"
+    keytool \
+        -genkey \
+        -keyalg RSA \
+        -alias server-cert \
+        -keystore "${_keystoreFile}" \
+        -storepass "${_pin}" \
+        -validity 30 \
+        -keysize 2048 \
+        -noprompt \
+        -dname "CN=ephemeral, OU=Docker, O=PingIdentity Corp., L=Denver, ST=CO, C=US"
+    cp "${_keystoreFile}" "${_truststoreFile}"
+    cp "${_keystorePinFile}" "${_truststorePinFile}"
+fi
+if test -z "${KEYSTORE_FILE}"
+then
+    # shellcheck disable=SC2016
+    echo 'KEYSTORE_FILE="'"${_keystoreFile}"'"' >> "${CONTAINER_ENV}"
+fi
+if test -z "${KEYSTORE_PIN}"
+then
+    # shellcheck disable=SC2016
+    echo 'KEYSTORE_PIN=$( cat "'"${_keystorePinFile}"'")' >> "${CONTAINER_ENV}"
+fi
+case "${_keystoreFile}" in
+	*.p12) echo 'KEYSTORE_TYPE=PKCS12' >> "${CONTAINER_ENV}" ;;
+	*) echo 'KEYSTORE_TYPE=JKS' >> "${CONTAINER_ENV}" ;;
+esac
+if test -z "${TRUSTSTORE_FILE}" 
+then
+    # shellcheck disable=SC2016
+    echo 'TRUSTSTORE_FILE="'"${_truststoreFile}"'"' >> "${CONTAINER_ENV}"
+fi
+if test -z "${TRUSTSTORE_PIN}"
+then
+    # shellcheck disable=SC2016
+    echo 'TRUSTSTORE_PIN=$( cat "'"${_truststorePinFile}"'")' >> "${CONTAINER_ENV}"
+fi
+case "${_truststoreFile}" in
+	*.p12) echo 'TRUSTSTORE_TYPE=PKCS12' >> "${CONTAINER_ENV}" ;;
+	*) echo 'TRUSTSTORE_TYPE=JKS' >> "${CONTAINER_ENV}" ;;
+esac
